@@ -1,0 +1,7 @@
+{
+  "genesis_time": "2023-03-21T00:00:00.000000000Z",
+  "chain_id": "the-blockchain-in-rust",
+  "balances": {
+    "andrej": 1000000
+  }
+}

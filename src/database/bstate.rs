@@ -5,20 +5,22 @@ use std::ops::Deref;
 use crate::database::tx::{Account,Tx};
 use anyhow::Result;
 use log::info;
+use log::Level::Debug;
 use crate::database::block::{BHash, Block, BlockFS};
 use crate::database::init_genesis;
 use crate::database::tx::TxType;
 use parking_lot::RwLock;
 
 #[derive(Debug)]
-pub struct Status{
+pub struct BStatus {
     balances: HashMap<Account,u64>,
     tx_mem_pool: Vec<Tx>,
     db_file:File,
     last_block_hash: BHash,
+    last_block :Block,
 }
 
-impl Status {
+impl BStatus {
    pub fn new() -> Result<Self> {
        let genesis = init_genesis();
        let mut bs=HashMap::new();
@@ -35,11 +37,12 @@ impl Status {
            .append(true)
            .open("./db/block.db")?;
 
-       let mut status = Status {
+       let mut status = BStatus {
            balances: bs,
            tx_mem_pool,
            db_file: db_file,
-           last_block_hash: BHash([0;32]),
+           last_block_hash: Default::default(),
+           last_block: Default::default(),
        };
 
        let mut blocks=Vec::new();
@@ -49,7 +52,11 @@ impl Status {
            let block_fs :BlockFS=serde_json::from_str(&line).unwrap();
            let block = block_fs.block;
            //status.apply_block(block); // mutable borrow happens here
-              blocks.push(block);
+           blocks.push(block.clone());
+
+           status.last_block = block;
+           status.last_block_hash = block_fs.hash;
+
        }
 
        for block in blocks {
@@ -59,6 +66,15 @@ impl Status {
 
     }
 
+    pub fn add_block(&mut self, block: Block) -> Result<()> {
+        info!("apply block ,txs len: {:?}", block.txs.len());
+        //self.last_block_hash =block.hash()?;
+        for tx in block.txs {
+            self.add_tx(tx)?;
+        }
+
+        Ok(())
+    }
 
     pub fn add_tx(&mut self, tx: Tx) -> Result<()> {
         self.apply_tx(tx.clone())?;
@@ -98,32 +114,47 @@ impl Status {
         // 将时间转换为时间戳
         let since_the_epoch = time_now.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
 
-        let block = Block::new(self.last_block_hash,since_the_epoch , self.tx_mem_pool.clone());
-        let block_hash = block.hash()?;
-        let block_fs= BlockFS::new(block_hash,block)?;
+        let last_block_hash = self.get_last_block_hash();
+
+        // 第一块比较特殊，没有上一块，所以number为0，要两种情况都满足才为初始块
+        let number = if self.last_block.header.number==0 && self.last_block_hash==Default::default(){
+            self.last_block.header.number
+        }else{
+            self.last_block.header.number+1
+        };
+        let block = Block::new(
+            last_block_hash,
+            since_the_epoch ,
+            number,
+            self.tx_mem_pool.clone()
+        );
+
+        let fs_block_hash = block.hash()?;
+
+        let block_fs= BlockFS::new(fs_block_hash,block.clone())?;
         let block_str = serde_json::to_string(&block_fs)?;
         let line = format!("{}\n", block_str);
         //info!("persisting block: {:?}", line);
         self.db_file.write_all(line.as_bytes()).map_err(|e| anyhow::anyhow!("failed to write to db file: {}", e))?;
 
-        self.last_block_hash = block_hash;
+        self.last_block_hash = fs_block_hash;
+        self.last_block = block.clone();
+
         self.tx_mem_pool.clear();
 
-        Ok(block_hash)
+        Ok(fs_block_hash)
     }
 
-    pub fn add_block(&mut self, block: Block) -> Result<()> {
-        info!("apply block ,txs len: {:?}", block.txs.len());
-        for tx in block.txs {
-            self.add_tx(tx)?;
-        }
-        Ok(())
-    }
+
     pub fn get_balance(&self) -> HashMap<Account,u64> {
         self.balances.clone()
     }
 
     pub fn get_last_block_hash(&self) -> BHash {
         self.last_block_hash
+    }
+
+    pub fn get_last_block(&self) -> Block {
+        self.last_block.clone()
     }
 }

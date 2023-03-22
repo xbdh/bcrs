@@ -3,9 +3,14 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use blake3;
 
-#[derive( Debug, Clone,Copy)]
+#[derive( Debug, Clone,Copy,Default)]
 pub struct BHash(pub [u8;32]);
 
+impl PartialEq for BHash {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
 impl Serialize for BHash{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -30,23 +35,25 @@ impl<'de> Deserialize<'de> for BHash {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone,Default)]
 pub struct Block {
     pub header: BlockHeader,
     pub txs: Vec<Tx>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone,Default)]
 pub struct BlockHeader {
     pub prev_hash: BHash,
+    pub number: u64,
     pub timestamp: u64,
 }
 
 impl Block{
-    pub fn new(prev_hash: BHash, timestamp: u64, txs: Vec<Tx>) -> Self {
+    pub fn new(prev_hash: BHash, timestamp: u64, number:u64, txs: Vec<Tx>) -> Self {
         Self {
             header: BlockHeader {
                 prev_hash,
+                number,
                 timestamp,
             },
             txs,

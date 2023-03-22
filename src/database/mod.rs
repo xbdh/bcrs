@@ -1,6 +1,6 @@
-pub mod state;
-mod tx;
-mod block;
+pub mod bstate;
+pub mod tx;
+pub mod block;
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use config::{Config, File, FileFormat};
 
 pub use block::Block;
 pub use tx::Tx;
-pub use state::Status;
+pub use bstate::BStatus;
 pub use tx::TxType;
 pub use block::BHash;
 

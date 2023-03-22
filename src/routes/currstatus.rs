@@ -4,8 +4,8 @@ use axum::{Extension};
 use axum::extract::{Json,State};
 use axum::response::IntoResponse;
 use axum::http::StatusCode;
-use parking_lot::RwLock;
-//use std::sync::RwLock;
+use log::info;
+use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use crate::database::{BHash, bstate, TxType};
 use crate::node::{Node,PeerNode};
@@ -13,9 +13,10 @@ use crate::node::{Node,PeerNode};
 pub async fn curr_status(
     State(node):State<Arc<RwLock<Node>>>
 ) -> impl IntoResponse {
-    //let bstatus =&node.read().bstatus.clone();
-    let node = node.read();
+    info!("curr_status");
+    let node =node.read().await;
     let bstatus = &node.bstatus;
+
 
     let cur = CurrentStatusResponse{
         height: bstatus.get_last_block().header.number,
@@ -23,8 +24,7 @@ pub async fn curr_status(
         known_peers: node.known_peers.clone(),
 
     };
-    //let  res= serde_json::to_string(&cur).unwrap();
-    //(StatusCode::OK, Json(cur))
+    info!("curr_status: {:?}", cur);
     Json(cur)
 }
 

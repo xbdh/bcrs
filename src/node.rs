@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use crate::database::{bstate, BStatus};
 use anyhow::Result;
 use axum::http::status;
 use log::info;
+use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use reqwest;
@@ -10,9 +12,12 @@ use crate::routes::currstatus::CurrentStatusResponse;
 
 
 pub struct Node {
-    pub bstatus: BStatus,
+    // pub bstatus: Arc<RwLock<BStatus>>,
+    // pub port: u16,
+    // pub known_peers: Arc<RwLock<HashMap<String,PeerNode>>>,
+    pub bstatus:BStatus,
     pub port: u16,
-    pub known_peers: HashMap<String,PeerNode>,
+    pub known_peers:HashMap<String,PeerNode>,
 }
 
 impl Node{
@@ -23,9 +28,9 @@ impl Node{
 
         Ok(
             Self {
-                bstatus,
+                bstatus: bstatus,
                 port,
-                known_peers:peers
+                known_peers: peers,
             }
         )
     }
@@ -43,11 +48,13 @@ impl Node{
     }
 
     pub async fn fetch_new_block_and_peer(&mut self) -> Result<()> {
+        info!("fetching new block and peer");
         let mut new_peers=HashMap::new();
+        let bstatus = &self.bstatus;
         for (tcp_addr, peer) in self.known_peers.iter(){
 
             let peer_curr_state =query_peer_status(peer).await?; // 错误也要继续
-            let  lock_block_number =self.bstatus.get_last_block().header.number;
+            let  lock_block_number =bstatus.get_last_block().header.number;
             if peer_curr_state.height > lock_block_number {
                 let block_count = peer_curr_state.height - lock_block_number;
                 info!("need fetching {:?}new block from peer{:?}:", block_count, tcp_addr);
@@ -94,6 +101,7 @@ impl PeerNode {
 }
 
 async fn query_peer_status(peer: &PeerNode) -> Result<CurrentStatusResponse> {
+    info!("querying peer status: {:?}", peer);
     let tcp_addr = peer.tcp_addr();
     let client = reqwest::Client::new();
     let url = format!("http://{}/node/status", tcp_addr);

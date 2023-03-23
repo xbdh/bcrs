@@ -1,23 +1,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use axum::{Extension, Json};
-use axum::body::HttpBody;
+use axum::{Json};
+
 use axum::response::IntoResponse;
-use axum::http::StatusCode;
+
 use axum::extract::State;
 use log::info;
-use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use crate::database::tx::Account;
-use crate::database::{BHash, bstate};
-use crate::node::{Node,PeerNode};
+use crate::database::{BHash};
+use crate::node::{Node};
 pub async fn balances_list(
-    State(node):State<Arc<RwLock<Node>>>
+    State(node):State<Arc<Node>>
 ) -> impl IntoResponse {
-    info!("balances_list");
+    info!("balances list handler");
 
-    let node =node.read().await;
-    let bstatus = &node.bstatus;
+    let bstatus = node.bstatus.read().await;
 
     let bs = bstatus.get_balance();
     let bs_res=BalanceListResponse{

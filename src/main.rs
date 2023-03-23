@@ -2,7 +2,7 @@
 use bcrs::database::{BHash, Block, BStatus, Tx, TxType};
 fn main() {
     env_logger::init();
-    let mut status= BStatus::new().unwrap();
+    let mut status= BStatus::new("./db/node1".to_string()).unwrap();
     let bs=status.get_balance();
 
     println!("{:?}", bs);

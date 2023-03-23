@@ -1,15 +1,12 @@
 use std::collections::HashMap;
 use std::fs::{OpenOptions, File};
 use std::io::{BufRead, BufReader, Write};
-use std::ops::Deref;
 use crate::database::tx::{Account,Tx};
 use anyhow::Result;
 use log::info;
-use log::Level::Debug;
 use crate::database::block::{BHash, Block, BlockFS};
 use crate::database::init_genesis;
 use crate::database::tx::TxType;
-use parking_lot::RwLock;
 
 #[derive(Debug)]
 pub struct BStatus {
@@ -20,8 +17,20 @@ pub struct BStatus {
     last_block :Block,
 }
 
+impl Clone for BStatus{
+    fn clone(&self) -> Self {
+        BStatus {
+            balances: self.balances.clone(),
+            tx_mem_pool: self.tx_mem_pool.clone(),
+            db_file: self.db_file.try_clone().unwrap(),
+            last_block_hash: self.last_block_hash.clone(),
+            last_block: self.last_block.clone(),
+        }
+    }
+}
+
 impl BStatus {
-   pub fn new() -> Result<Self> {
+   pub fn new(dir_path:String) -> Result<Self> {
        let genesis = init_genesis();
        let mut bs=HashMap::new();
        for (k,v) in genesis.balances {
@@ -30,12 +39,13 @@ impl BStatus {
        let tx_mem_pool = Vec::new();
        // 可读可写的方式打开文件
 
+       let db_path = dir_path + "/block.db";
        let db_file = OpenOptions::new()
            .read(true)
            .write(true)
            .create(true)
            .append(true)
-           .open("./db/block.db")?;
+           .open(db_path)?;
 
        let mut status = BStatus {
            balances: bs,
@@ -60,14 +70,16 @@ impl BStatus {
        }
 
        for block in blocks {
-           status.add_block(block);
+           status.add_block(block)?;
        }
+       let hstr=serde_json::to_string(&status.last_block_hash).unwrap().trim_matches('"').to_string();
+       info!("init status ok ,last block hash: {:?},block height:{}", hstr,status.get_height());
         Ok(status)
 
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<()> {
-        info!("apply block ,txs len: {:?}", block.txs.len());
+        //info!("apply block ,txs len: {:?}", block.txs.len());
         //self.last_block_hash =block.hash()?;
         for tx in block.txs {
             self.add_tx(tx)?;
@@ -83,7 +95,7 @@ impl BStatus {
         Ok(())
     }
     pub fn apply_tx(&mut self, tx: Tx) -> Result<()> {
-        info!("apply tx: {:?}", tx);
+       // info!("apply tx: {:?}", tx);
         match tx.tx_type {
             TxType::Normal => {
                 //两次mut borrow所以用if let
@@ -156,5 +168,9 @@ impl BStatus {
 
     pub fn get_last_block(&self) -> Block {
         self.last_block.clone()
+    }
+
+    pub fn get_height(&self) -> u64 {
+        self.last_block.header.number
     }
 }

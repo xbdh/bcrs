@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader};
 use crate::database::tx::Tx;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -82,4 +84,32 @@ impl BlockFS {
             block: block,
         })
     }
+}
+
+pub fn get_blocks_after_hash(hash: BHash,dir_path:String) -> Result<Vec<Block>> {
+    let mut blocks = Vec::new();
+    let db_path = dir_path + "/block.db";
+    let db_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(db_path)?;
+
+    let bufreader = BufReader::new(db_file);
+    for line in bufreader.lines() {
+        let line = line.unwrap();
+        let block_fs :BlockFS=serde_json::from_str(&line).unwrap();
+        let block = block_fs.block;
+        // 当hash为默认值时，返回所有的block
+
+        if hash==Default::default() {
+            blocks.push(block.clone());
+            continue;
+        }
+        if block.header.prev_hash == hash {
+            blocks.push(block.clone());
+        }
+    }
+    Ok(blocks)
 }

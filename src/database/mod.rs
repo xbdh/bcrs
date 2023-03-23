@@ -5,7 +5,7 @@ pub mod block;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::database::tx::Account;
-use config::{Config, File, FileFormat};
+use config::Config;
 
 pub use block::Block;
 pub use tx::Tx;

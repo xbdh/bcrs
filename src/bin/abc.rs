@@ -43,7 +43,7 @@
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc;
 
-    async fn async_operation(state: Arc<Mutex<State>>) -> u32 {
+    async fn async_operation(_state: Arc<Mutex<State>>) -> u32 {
         // ...
         42
     }

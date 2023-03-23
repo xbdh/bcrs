@@ -1,40 +1,57 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::database::{bstate, BStatus};
+use crate::database::{ BStatus};
 use anyhow::Result;
-use axum::http::status;
 use log::info;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock};
+//use parking_lot::RwLock ;
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use reqwest;
 use crate::routes::currstatus::CurrentStatusResponse;
 
-
+#[derive(Debug, Clone)]
 pub struct Node {
-    // pub bstatus: Arc<RwLock<BStatus>>,
-    // pub port: u16,
-    // pub known_peers: Arc<RwLock<HashMap<String,PeerNode>>>,
-    pub bstatus:BStatus,
-    pub port: u16,
-    pub known_peers:HashMap<String,PeerNode>,
+    pub dir_path: String,
+
+    pub bstatus: Arc<RwLock<BStatus>>,
+    pub known_peers: Arc<RwLock<HashMap<String,PeerNode>>>,
 }
 
 impl Node{
-    pub fn new(port: u16, bstatus: BStatus, bootstrap : PeerNode) -> Result<Self> {
+    pub fn new(dir_path:String, bootstrap : PeerNode) -> Result<Self> {
+        let bstatus = BStatus::new(dir_path.clone())?;
         let mut peers=HashMap::new();
         let tcp_addr=bootstrap.tcp_addr();
+
+        info!("node created, bootstrap node ip  {}",tcp_addr);
         peers.insert(tcp_addr,bootstrap);
 
-        Ok(
-            Self {
-                bstatus: bstatus,
-                port,
-                known_peers: peers,
-            }
-        )
+         let node=   Self {
+                dir_path,
+                bstatus: Arc::new(RwLock::new(bstatus)),
+                known_peers: Arc::new(RwLock::new(peers)),
+         };
+
+        Ok(node)
+
     }
-    pub async  fn sync(&mut self) -> Result<()> {
+    pub async fn get_status(&self) -> BStatus {
+        let  b= self.bstatus.read().await;
+        b.clone()
+    }
+    pub async fn get_known_peers(&self) -> HashMap<String,PeerNode> {
+        let known_peers = self.known_peers.read().await;
+        known_peers.clone()
+    }
+    pub async fn set_known_peers(&self, peers: HashMap<String,PeerNode>) {
+        let mut known_peers = self.known_peers.write().await;
+        for (tcp_addr, peer) in peers.iter(){
+            known_peers.insert(tcp_addr.clone(),peer.clone());
+        }
+    }
+
+    pub async fn sync(&self) -> Result<()> {
         info!("syncing with peers");
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(45));
         loop {
@@ -47,13 +64,18 @@ impl Node{
         }
     }
 
-    pub async fn fetch_new_block_and_peer(&mut self) -> Result<()> {
+    pub async fn fetch_new_block_and_peer(&self) -> Result<()> {
         info!("fetching new block and peer");
         let mut new_peers=HashMap::new();
-        let bstatus = &self.bstatus;
-        for (tcp_addr, peer) in self.known_peers.iter(){
+
+        let known_peers = self.get_known_peers().await;
+        let bstatus = self.get_status().await;
+
+
+        for (tcp_addr, peer) in known_peers.iter(){
 
             let peer_curr_state =query_peer_status(peer).await?; // 错误也要继续
+
             let  lock_block_number =bstatus.get_last_block().header.number;
             if peer_curr_state.height > lock_block_number {
                 let block_count = peer_curr_state.height - lock_block_number;
@@ -62,19 +84,15 @@ impl Node{
             }
 
             for (tcp_addr, peer) in peer_curr_state.known_peers.iter(){
-                if !self.known_peers.contains_key(tcp_addr){
+                if !known_peers.contains_key(tcp_addr){
                     info!("found new peer: {:?}", tcp_addr);
                     new_peers.insert(tcp_addr.clone(),peer.clone());
                 }
             }
         }
-        for (tcp_addr, peer) in new_peers.iter(){
-            self.known_peers.insert(tcp_addr.clone(),peer.clone());
-        }
+        self.set_known_peers(new_peers).await;
         Ok(())
     }
-
-
 
 }
 
@@ -101,13 +119,13 @@ impl PeerNode {
 }
 
 async fn query_peer_status(peer: &PeerNode) -> Result<CurrentStatusResponse> {
-    info!("querying peer status: {:?}", peer);
+    info!("querying peer status from node: {:?}", peer.tcp_addr());
     let tcp_addr = peer.tcp_addr();
-    let client = reqwest::Client::new();
     let url = format!("http://{}/node/status", tcp_addr);
-    let res :CurrentStatusResponse = client.get(&url).send().await?.json::<CurrentStatusResponse>().await?;
-
-    //let bs=serde_json::from_value(res)?;
-    info!("peer status: {:?}", res);
-    Ok(res)
+    let client = reqwest::Client::new();
+    let resp :CurrentStatusResponse = client.get(&url).send().await.unwrap().json::<CurrentStatusResponse>().await?;
+    // let resp = reqwest::blocking::get(url)?
+    //     .json::<CurrentStatusResponse>()?;
+    //
+    Ok(resp)
 }

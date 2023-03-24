@@ -85,7 +85,7 @@ impl BlockFS {
         })
     }
 }
-
+// get all blocks after hash ,not include hash
 pub fn get_blocks_after_hash(hash: BHash,dir_path:String) -> Result<Vec<Block>> {
     let mut blocks = Vec::new();
     let db_path = dir_path + "/block.db";

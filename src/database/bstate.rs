@@ -13,8 +13,9 @@ pub struct BStatus {
     balances: HashMap<Account,u64>,
     tx_mem_pool: Vec<Tx>,
     db_file:File,
-    last_block_hash: BHash,
+    pub(crate) last_block_hash: BHash,
     last_block :Block,
+    // is_genesis: bool, // block.db是否一个块都没有
 }
 
 impl Clone for BStatus{
@@ -25,6 +26,7 @@ impl Clone for BStatus{
             db_file: self.db_file.try_clone().unwrap(),
             last_block_hash: self.last_block_hash.clone(),
             last_block: self.last_block.clone(),
+            // is_genesis: self.is_genesis,
         }
     }
 }
@@ -53,6 +55,7 @@ impl BStatus {
            db_file: db_file,
            last_block_hash: Default::default(),
            last_block: Default::default(),
+           // is_genesis: true,
        };
 
        let mut blocks=Vec::new();
@@ -66,11 +69,10 @@ impl BStatus {
 
            status.last_block = block;
            status.last_block_hash = block_fs.hash;
-
        }
-
+       info!("block.len:{}",blocks.len());
        for block in blocks {
-           status.add_block(block)?;
+           apply_txs(block.txs, &mut status)?;
        }
        let hstr=serde_json::to_string(&status.last_block_hash).unwrap().trim_matches('"').to_string();
        info!("init status ok ,last block hash: {:?},block height:{}", hstr,status.get_height());
@@ -78,85 +80,33 @@ impl BStatus {
 
     }
 
-    pub fn add_block(&mut self, block: Block) -> Result<()> {
-        //info!("apply block ,txs len: {:?}", block.txs.len());
-        //self.last_block_hash =block.hash()?;
-        for tx in block.txs {
-            self.add_tx(tx)?;
-        }
+    pub fn add_block(&mut self, block: Block) -> Result<BHash> {
+        info !("add block: {:?}", block);
+        apply_block( block.clone(),self)?;
+        let block_hash = block.hash()?;
 
-        Ok(())
-    }
-
-    pub fn add_tx(&mut self, tx: Tx) -> Result<()> {
-        self.apply_tx(tx.clone())?;
-        self.tx_mem_pool.push(tx);
-
-        Ok(())
-    }
-    pub fn apply_tx(&mut self, tx: Tx) -> Result<()> {
-       // info!("apply tx: {:?}", tx);
-        match tx.tx_type {
-            TxType::Normal => {
-                //两次mut borrow所以用if let
-               if let Some(from_balance) = self.balances.get_mut(&tx.from){
-                   if *from_balance < tx.value {
-                       return Err(anyhow::anyhow!("insufficient balance"));
-                   }
-                    *from_balance -= tx.value;
-                }
-               // if  let Some(to_balance) = self.balances.get_mut(&tx.to) {
-               //     *to_balance += tx.value;
-               // }
-                self.balances.entry(tx.to).and_modify(|e| *e += tx.value).or_insert(tx.value);
-
-            }
-            TxType::Reward => {
-                if let Some(to_balance) = self.balances.get_mut(&tx.to){
-                    *to_balance += tx.value;
-                }
-            }
-        }
-
-        Ok(())
-    }
-    pub fn persist(&mut self) -> Result<BHash> {
-        info!("persisting block" );
-        let time_now = std::time::SystemTime::now();
-        // 将时间转换为时间戳
-        let since_the_epoch = time_now.duration_since(std::time::UNIX_EPOCH).expect("Time went backwards").as_secs();
-
-        let last_block_hash = self.get_last_block_hash();
-
-        // 第一块比较特殊，没有上一块，所以number为0，要两种情况都满足才为初始块
-        let number = if self.last_block.header.number==0 && self.last_block_hash==Default::default(){
-            self.last_block.header.number
-        }else{
-            self.last_block.header.number+1
+        let block_fs = BlockFS {
+            hash: block_hash.clone(),
+            block,
         };
-        let block = Block::new(
-            last_block_hash,
-            since_the_epoch ,
-            number,
-            self.tx_mem_pool.clone()
-        );
-
-        let fs_block_hash = block.hash()?;
-
-        let block_fs= BlockFS::new(fs_block_hash,block.clone())?;
         let block_str = serde_json::to_string(&block_fs)?;
-        let line = format!("{}\n", block_str);
-        //info!("persisting block: {:?}", line);
-        self.db_file.write_all(line.as_bytes()).map_err(|e| anyhow::anyhow!("failed to write to db file: {}", e))?;
+        let line= block_str + "\n";
+        self.db_file.write_all(line.as_bytes())?;
 
-        self.last_block_hash = fs_block_hash;
-        self.last_block = block.clone();
 
-        self.tx_mem_pool.clear();
+        //self.balances = pending_state.balances;
+        self.last_block_hash = block_hash.clone();
+        self.last_block = block_fs.block;
 
-        Ok(fs_block_hash)
+        Ok(block_hash)
     }
 
+    // fn next_block_number(&self) -> u64 {
+    //     if self.is_genesis {
+    //         return 0;
+    //     }
+    //     self.last_block.header.number + 1
+    // }
 
     pub fn get_balance(&self) -> HashMap<Account,u64> {
         self.balances.clone()
@@ -173,4 +123,47 @@ impl BStatus {
     pub fn get_height(&self) -> u64 {
         self.last_block.header.number
     }
+}
+
+// 对新加入的块进行验证，验证通过后，将交易加入到内存池中
+// 这个块可能是新块，也可能是从别的节点同步过来的块，是第一块
+fn apply_block(block: Block,bstatus:&mut BStatus) -> Result<()> {
+    // let next_expected_block_number = bstatus.next_block_number();
+    //
+    // if block.header.number != next_expected_block_number {
+    //     return Err(anyhow::anyhow!("invalid block number"));
+    // }
+    // if bstatus.get_height()>0&&  block.header.prev_hash != bstatus.get_last_block_hash() {
+    //     return Err(anyhow::anyhow!("invalid prev block hash"));
+    // }
+
+    apply_txs(block.txs,bstatus)?;
+    Ok(())
+}
+
+fn apply_txs(txs: Vec<Tx>, bstatus: &mut BStatus) -> Result<()> {
+    for tx in txs {
+        apply_tx(tx,bstatus)?;
+    }
+    Ok(())
+}
+
+fn apply_tx(tx: Tx, bstatus: &mut BStatus) -> Result<()> {
+    match tx.tx_type {
+        TxType::Normal => {
+            if let Some(from_balance) = bstatus.balances.get_mut(&tx.from) {
+                if *from_balance < tx.value {
+                    return Err(anyhow::anyhow!("insufficient balance"));
+                }
+                *from_balance -= tx.value;
+            }
+            bstatus.balances.entry(tx.to).and_modify(|e| *e += tx.value).or_insert(tx.value);
+        }
+        TxType::Reward => {
+            if let Some(to_balance) = bstatus.balances.get_mut(&tx.to) {
+                *to_balance += tx.value;
+            }
+        }
+    }
+    Ok(())
 }

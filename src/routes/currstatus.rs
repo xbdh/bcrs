@@ -25,6 +25,7 @@ pub async fn curr_status(
         known_peers: known_peers,
 
     };
+    //info!("current status result: {:?}", cur);
     Json(cur)
 }
 

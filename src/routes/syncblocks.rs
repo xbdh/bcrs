@@ -13,7 +13,7 @@ pub async fn sync_blocks(
 ) -> impl IntoResponse {
     info!("sync blocks handler");
     let dir=node.dir_path.clone();
-    let bhash=q.from_block;
+    let bhash=q.begin_hash;
     let blocks=get_blocks_after_hash(bhash, dir).unwrap();
 
     Json(blocks)
@@ -21,6 +21,6 @@ pub async fn sync_blocks(
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SyncBlocksQuery {
-    pub from_block: BHash,
+    pub begin_hash: BHash,
 
 }

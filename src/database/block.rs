@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use blake3;
 
-#[derive( Debug, Clone,Copy,Default)]
+#[derive( Debug, Clone,Copy,Default,Eq,Hash)]
 pub struct BHash(pub [u8;32]);
 
 impl PartialEq for BHash {
@@ -47,15 +47,17 @@ pub struct Block {
 pub struct BlockHeader {
     pub prev_hash: BHash,
     pub number: u64,
+    pub nonce: u64,
     pub timestamp: u64,
 }
 
 impl Block{
-    pub fn new(prev_hash: BHash, timestamp: u64, number:u64, txs: Vec<Tx>) -> Self {
+    pub fn new(prev_hash: BHash, timestamp: u64, number:u64, nonce :u64,txs: Vec<Tx>) -> Self {
         Self {
             header: BlockHeader {
                 prev_hash,
                 number,
+                nonce,
                 timestamp,
             },
             txs,
@@ -112,4 +114,14 @@ pub fn get_blocks_after_hash(hash: BHash,dir_path:String) -> Result<Vec<Block>> 
         }
     }
     Ok(blocks)
+}
+
+pub fn is_block_hash_valid(hash: &BHash) ->bool {
+    let mut hash_array = hash.0;
+    let hash_str = hex::encode(hash_array);
+
+    if hash_str.starts_with("0000") {
+        return true;
+    }
+    false
 }

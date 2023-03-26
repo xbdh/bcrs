@@ -39,6 +39,7 @@ parking_lot = "0.12"
 hex = "0.4.3"
 reqwest = { version = "0.11", features = ["json"] }
 chrono = "0.4.24"
+rand = "0.8.5"
 
 #size优化 https://stackoverflow.com/questions/29008127/why-are-rust-executables-so-huge
 

@@ -27,5 +27,5 @@ pub struct TxAddRequest {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct TxAddResponse {
-    pub tx_hash: String,
+    pub is_success: bool  ,
 }

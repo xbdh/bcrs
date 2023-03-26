@@ -4,14 +4,13 @@ use std::io::{BufRead, BufReader, Write};
 use crate::database::tx::{Account,Tx};
 use anyhow::Result;
 use log::info;
-use crate::database::block::{BHash, Block, BlockFS};
+use crate::database::block::{BHash, Block, BlockFS, is_block_hash_valid};
 use crate::database::init_genesis;
 use crate::database::tx::TxType;
 
 #[derive(Debug)]
 pub struct BStatus {
     balances: HashMap<Account,u64>,
-    tx_mem_pool: Vec<Tx>,
     db_file:File,
     pub(crate) last_block_hash: BHash,
     last_block :Block,
@@ -22,7 +21,6 @@ impl Clone for BStatus{
     fn clone(&self) -> Self {
         BStatus {
             balances: self.balances.clone(),
-            tx_mem_pool: self.tx_mem_pool.clone(),
             db_file: self.db_file.try_clone().unwrap(),
             last_block_hash: self.last_block_hash.clone(),
             last_block: self.last_block.clone(),
@@ -38,7 +36,6 @@ impl BStatus {
        for (k,v) in genesis.balances {
            bs.insert(k, v);
        }
-       let tx_mem_pool = Vec::new();
        // 可读可写的方式打开文件
 
        let db_path = dir_path + "/block.db";
@@ -51,7 +48,6 @@ impl BStatus {
 
        let mut status = BStatus {
            balances: bs,
-           tx_mem_pool,
            db_file: db_file,
            last_block_hash: Default::default(),
            last_block: Default::default(),
@@ -81,7 +77,7 @@ impl BStatus {
     }
 
     pub fn add_block(&mut self, block: Block) -> Result<BHash> {
-        info !("add block: {:?}", block);
+        info !("prepare to add block: it number is {:?}", block.header.number);
         apply_block( block.clone(),self)?;
         let block_hash = block.hash()?;
 
@@ -98,6 +94,7 @@ impl BStatus {
         self.last_block_hash = block_hash.clone();
         self.last_block = block_fs.block;
 
+        info!("persist new  block ok, block hash: {:?}", block_hash);
         Ok(block_hash)
     }
 
@@ -135,8 +132,12 @@ fn apply_block(block: Block,bstatus:&mut BStatus) -> Result<()> {
     // }
     // if bstatus.get_height()>0&&  block.header.prev_hash != bstatus.get_last_block_hash() {
     //     return Err(anyhow::anyhow!("invalid prev block hash"));
-    // }
-
+     // }
+    let hash = block.hash()?;
+    if !is_block_hash_valid(&hash) {
+        return Err(anyhow::anyhow!("invalid block hash"));
+    }
+    
     apply_txs(block.txs,bstatus)?;
     Ok(())
 }

@@ -12,6 +12,7 @@ use crate::routes::addpeer::AddPeerResponse;
 use crate::routes::currstatus::CurrentStatusResponse;
 use tokio::sync::mpsc::{Receiver, Sender};
 use std::ops::DerefMut;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const SYNC_INTERVAL: u64 = 25;
 
@@ -38,43 +39,58 @@ impl PeerNode {
         format!("{}:{}", self.ip, self.port)
     }
 }
+
+
+
+#[derive(Debug)]
+pub struct CancelFlag {
+    cancel_flag: AtomicBool,
+}
+
+impl CancelFlag {
+    pub fn new() -> Self {
+        Self {
+            cancel_flag: AtomicBool::new(false),
+        }
+    }
+    pub fn cancel(&self) {
+        self.cancel_flag.store(true, Ordering::SeqCst);
+    }
+    pub fn is_canceled(&self) -> bool {
+        self.cancel_flag.load(Ordering::SeqCst)
+    }
+}
+
+
 // new sync block channel struct,contains mspc channel reciver and sender
 #[derive(Debug)]
 pub struct SyncBlockChannel {
-    pub receiver: Receiver<Block>,
-    pub sender: Sender<Block>,
+    pub receiver: Arc<Mutex<Receiver<Block>>>,
+    pub sender: Arc<Mutex<Sender<Block>>>   ,
 }
-
-// impl Clone for SyncBlockChannel{
-//     fn clone(&self) -> Self {
-//         Self {
-//             receiver: self.receiver.close(),
-//             sender: self.sender.clone(),
-//         }
-//     }
-// }
 
 
 
 impl SyncBlockChannel{
     pub fn new() -> Self {
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
         Self {
-            receiver,
-            sender,
+            receiver: Arc::new(Mutex::new(receiver)),
+            sender: Arc::new(Mutex::new(sender)),
         }
     }
-    // send block to channel
-    pub async fn send_block(&self,block:Block) -> Result<()> {
-        self.sender.send(block).await?;
+    pub async fn send(&self,block:Block) -> Result<()> {
+        let mut sender = self.sender.lock().await;
+        sender.send(block).await?;
         Ok(())
     }
-    // receive block from channel
-    pub async fn receive_block(&mut self) -> Result<Block> {
-        let block = self.receiver.recv().await.ok_or(anyhow!("receive block error"))?;
+    pub async fn recv(&self) -> Result<Block> {
+        let mut receiver = self.receiver.lock().await;
+        let block = receiver.recv().await.ok_or(anyhow!("recv block error"))?;
         Ok(block)
     }
 }
+
 
 
 
@@ -90,7 +106,8 @@ pub struct Node {
     pub pending_txs: Arc<RwLock<HashMap<BHash,Tx>>>,
     pub archive_txs: Arc<RwLock<HashMap<BHash,Tx>>>,
 
-    pub new_sync_block_channel: Arc<Mutex<SyncBlockChannel>>,
+    pub new_sync_block_channel: Arc<SyncBlockChannel>,
+    pub cancel_flag: Arc<CancelFlag>,
     pub is_mining: Arc<RwLock<bool>>,
 
 }
@@ -119,7 +136,8 @@ impl Node{
                 known_peers: Arc::new(RwLock::new(peers)),
                 pending_txs: Arc::new(RwLock::new(HashMap::new())),
                 archive_txs: Arc::new(RwLock::new(HashMap::new())),
-                new_sync_block_channel: Arc::new(Mutex::new(SyncBlockChannel::new())),
+                new_sync_block_channel: Arc::new(SyncBlockChannel::new()),
+                cancel_flag: Arc::new(CancelFlag::new()),
                 is_mining: Arc::new(RwLock::new(false)),
          };
 
@@ -192,6 +210,9 @@ impl Node{
     }
     pub async fn get_next_block_number(&self) -> u64 {
         let bstatus = self.bstatus.read().await;
+        if bstatus.last_block_hash==BHash::default() && bstatus.get_height()==0{
+            return 0;
+        }
         bstatus.get_height()+1
     }
 

@@ -120,7 +120,7 @@ pub fn is_block_hash_valid(hash: &BHash) ->bool {
     let mut hash_array = hash.0;
     let hash_str = hex::encode(hash_array);
 
-    if hash_str.starts_with("0000") {
+    if hash_str.starts_with("00000") {
         return true;
     }
     false

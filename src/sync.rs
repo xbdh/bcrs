@@ -2,7 +2,7 @@ use crate::node::{Node, PeerNode};
 use log::info;
 use anyhow::{anyhow, Result};
 use tokio::select;
-use crate::database::{BHash, Block};
+use crate::database::{BHash, Block, Tx};
 use crate::routes::addpeer::AddPeerResponse;
 use crate::routes::currstatus::CurrentStatusResponse;
 
@@ -20,7 +20,7 @@ const ENDOINT_ADD_PERR_QUERY_KEY_PORT: &str = "port";
 impl Node {
     pub async fn sync(&self) -> Result<()> {
         info!("syncing with peers,with 45 second interval");
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(25));
         loop {
             select! {
                 _ = ticker.tick() => {
@@ -73,6 +73,15 @@ impl Node {
                 }
                 Err(e) => {
                     info!("sync peers error: {:?}", e);
+                    continue;
+                }
+            }
+            match self.sync_pending_txs(peer,&peer_curr_state.pending_txs).await{
+                Ok(_) => {
+                    info!("sync txs success");
+                }
+                Err(e) => {
+                    info!("sync txs error: {:?}", e);
                     continue;
                 }
             }
@@ -156,12 +165,23 @@ impl Node {
         }
         Ok(())
     }
+    pub async fn sync_pending_txs(&self,peer:&PeerNode,txs:&Vec<Tx>) -> Result<()> {
+        // 把对方的pending txs同步到本地
+        info!("===begin sync pending txs from peer: {:?}", peer.tcp_addr());
+        for tx in txs.iter(){
+            info!("pending tx from peer is : {:?}", tx);
+            self.add_pending_tx(tx.clone(),peer).await?;
+        }
+        Ok(())
+    }
+
+
     pub async fn add_blocks(&self, block:Vec< Block>) -> Result<()> {
         let mut bstatus = self.bstatus.write().await;
         for b in block.iter() {
             bstatus.add_block(b.clone())?;
-            let new_sync_block_channel = self.new_sync_block_channel.lock().await;
-           new_sync_block_channel.sender.send(b.clone()).await?;
+            let new_sync_block_channel = self.new_sync_block_channel.clone();
+            new_sync_block_channel.send(b.clone()).await?;
         }
         Ok(())
     }

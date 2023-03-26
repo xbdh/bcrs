@@ -59,13 +59,23 @@ async fn main(){
 
     let node = Node::new(opts.name,opts.dir.clone(),opts.ip,opts.port,bootstrap_node).unwrap();
 
-    let shared_data = Arc::new(node);
-    let shared_data_clone = shared_data.clone();
+    let http_node = Arc::new(node);
+    let sync_node = http_node.clone();
+    let mine_node = http_node.clone();
 
     tokio::spawn(async move {
         // sleep for 5 seconds
         tokio::time::sleep(Duration::from_secs(3)).await;
-        let _s=shared_data_clone.sync().await;
+        info!("start sync blocks...")   ;
+        let _s= sync_node.sync().await;
+
+    });
+
+    tokio::spawn(async move {
+        // sleep for 5 seconds
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        info! ("start mine blocks...")   ;
+        let _s= mine_node.mine().await;
 
     });
 
@@ -77,7 +87,7 @@ async fn main(){
         .route("/node/status", get(curr_status))
         .route("/node/sync", get(sync_blocks))
         .route("/node/peer", get(add_peer))
-        .with_state(shared_data);
+        .with_state(http_node);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], opts.port.clone()));
     info!("node listening on: {},dir path:{} ", addr,opts.dir);

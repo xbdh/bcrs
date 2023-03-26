@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::os::unix::raw::time_t;
 use serde::{Deserialize, Serialize};
 use crate::database::{BHash, Block, Tx};
 use crate::database::block::is_block_hash_valid;
@@ -27,36 +26,7 @@ impl PendingBlock{
     }
 }
 
-pub fn mine(pending_block: PendingBlock) -> Result<Block> {
-    if pending_block.txs.len() == 0 {
-        return Err(anyhow::anyhow!("no txs in pending block"));
-    }
-    let mut block:Block=Default::default();
-    let start = std::time::Instant::now();
-    let mut attempts = 0;
 
-    loop {
-        let nonce = generate_nonce();
-        let b = Block::new(pending_block.prev_hash, pending_block.timestamp, pending_block.number, nonce, pending_block.txs.clone());
-        let hash = b.hash()?;
-        if is_block_hash_valid(&hash) {
-              block=b;
-              break;
-        }
-        attempts += 1;
-        if attempts % 100000 == 0|| attempts == 1 {
-            info!("Mine attempts: {} times, ", attempts);
-        }
-    }
-    info!("Mine block success, cost: {:?}s", start.elapsed().as_secs_f64());
-    info!("Mine block hash: {:?}", block.hash()?);
-    info!("Mine block nonce: {:?}", block.header.nonce);
-    info!("Mine block number: {:?}", block.header.number);
-    info!("Mine block prev_hash: {:?}",hex::encode(block.header.prev_hash.0));
-    info!("total attempts: {}", attempts);
-
-    Ok(block)
-}
 
 fn generate_nonce() -> u64 {
     rand::random()
@@ -64,13 +34,13 @@ fn generate_nonce() -> u64 {
 
 
 impl Node {
-    pub async fn mine(&self, pending_block: PendingBlock) {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
+    pub async fn mine(&self) {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(25));
 
         loop {
             let node = self.clone();
             let node2 = self.clone();
-            let mut ch = node2.new_sync_block_channel.lock().await;
+            let new_sync_block_channel = self.new_sync_block_channel.clone();
             select! {
 
                 _ = ticker.tick() => {
@@ -87,34 +57,25 @@ impl Node {
                       });
                     }
                     // 如果syncblockchannel 获取到了新的区块，并且正在挖矿，就停止挖矿，删除pending txs 中已经挖矿的交易
-                    res = ch.receiver.recv()=> {
+                    res = new_sync_block_channel.recv()=> {
                       match res{
-                        Some(block) => {
-                            info!("new block received, stop mining");
+                        Ok(block) => {
                             let is_mining = node2.get_is_mining().await;
                             if is_mining {
-                                node2.set_is_mining(false).await;
+                                node2.cancel_flag.cancel();
                                 node2.remove_mined_pending_txs(&block).await;
-                                node2.set_is_mining(true).await;
                             }
                         }
-                        None => {
-                            info!("new block channel closed");
+                       Err(_) => {
+                            info!("new_sync_block_channel closed");
                         }
-
-                    // }
-                    //     let is_mining = node2.get_is_mining().await;
-                    //     if is_mining {
-                    //         node2.set_is_mining(false).await;
-                    //
-                    //         node2.remove_mined_pending_txs(block).await;
-                    //         node2.set_is_mining(true).await;
-                    //     }
-
+                      }
 
           }
         }
-        }}}
+        }
+
+    }
 
     // if success, means the block is valid and add to blockchain
     pub async fn mine_pending_txs(&self) -> Result<()> {
@@ -123,11 +84,53 @@ impl Node {
             self.get_next_block_number().await,
             get_txsv_from_txsmp(&self.get_pending_txs().await),
         );
-        let mined_block=mine(block_to_mine)?;
-        self.remove_mined_pending_txs(&mined_block).await?;
-        self.add_block(mined_block).await?;
-
+        let mined_block= self.do_mine(block_to_mine);
+        match mined_block {
+            Ok(block) => {
+                self.remove_mined_pending_txs(&block).await?;
+                self.add_block(block).await?;
+            }
+            Err(e) => {
+                info!("mine canceled: {}", e);
+            }
+        }
         Ok(())
+    }
+    pub fn do_mine(&self,pending_block: PendingBlock) -> Result<Block> {
+        if pending_block.txs.len() == 0 {
+
+            return Err(anyhow::anyhow!("no txs in pending block"));
+        }
+        let mut block:Block=Default::default();
+        let start = std::time::Instant::now();
+        let mut attempts = 0;
+
+        loop {
+            if self.cancel_flag.is_canceled() {
+                info!("cancel mining");
+                return Err(anyhow::anyhow!("cancel mining"));
+            }
+
+            let nonce = generate_nonce();
+            let b = Block::new(pending_block.prev_hash, pending_block.timestamp, pending_block.number, nonce, pending_block.txs.clone());
+            let hash = b.hash()?;
+            if is_block_hash_valid(&hash) {
+                block=b;
+                break;
+            }
+            attempts += 1;
+            if attempts % 100000 == 0|| attempts == 1 {
+                info!("Mine attempts: {} times, ", attempts);
+            }
+        }
+        info!("Mine block success, cost: {:?}s", start.elapsed().as_secs_f64());
+        info!("Mine block hash: {:?}", block.hash()?);
+        info!("Mine block nonce: {:?}", block.header.nonce);
+        info!("Mine block number: {:?}", block.header.number);
+        info!("Mine block prev_hash: {:?}",hex::encode(block.header.prev_hash.0));
+        info!("total attempts: {}", attempts);
+
+        Ok(block)
     }
 
     pub async fn remove_mined_pending_txs(&self, mined_block: &Block) -> Result<()> {
@@ -148,12 +151,12 @@ impl Node {
         Ok(())
     }
 
-    pub async fn add_pending_tx(&self, tx: Tx,from_peer:PeerNode) -> Result<()> {
+    pub async fn add_pending_tx(&self, tx: Tx,from_peer:&PeerNode) -> Result<()> {
         let tx_hash = tx.tx_hash();
         let mut pending_txs = self.get_pending_txs().await;
         let mut archive_txs = self.get_archive_txs().await;
         if !pending_txs.contains_key(&tx_hash) && !archive_txs.contains_key(&tx_hash) {
-           //self.add_tx_to_archive_txs(tx.clone()).await;
+            info!("add_pending_tx from peer: {:?}",from_peer);
             self.add_tx_to_pending_txs(tx.clone()).await;
         }
         Ok(())
@@ -180,7 +183,7 @@ impl Node {
 // 当确认的交易记录不再需要保留时，矿工或节点的软件可能会将这些记录从mined_txs中移动到archive_txs中。
 
 // hashmap<BHash,Tx> zhuanhuan wei vec<Tx>
-fn get_txsv_from_txsmp(pending_txs: &HashMap<BHash, Tx>) -> Vec<Tx> {
+pub fn get_txsv_from_txsmp(pending_txs: &HashMap<BHash, Tx>) -> Vec<Tx> {
     let mut txs: Vec<Tx> = Vec::new();
     for (_, tx) in pending_txs {
         txs.push(tx.clone());

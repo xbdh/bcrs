@@ -7,6 +7,7 @@ use log::info;
 
 use serde::{Deserialize, Serialize};
 use crate::database::{BHash, Tx};
+use crate::mine::get_txsv_from_txsmp;
 use crate::node::{Node,PeerNode};
 
 pub async fn curr_status(
@@ -17,11 +18,15 @@ pub async fn curr_status(
 
     let bstatus = node.get_status().await;
     let mut known_peers = node.get_known_peers().await;
+    
+    let pending_txs_mp = node.get_pending_txs().await;
+    let vv=get_txsv_from_txsmp(&pending_txs_mp);
+    
     let cur = CurrentStatusResponse{
         height: bstatus.get_last_block().header.number,
         hash: bstatus.get_last_block_hash(),
         known_peers: known_peers,
-        pending_txs:Default::default(),
+        pending_txs:vv,
     };
     //info!("current status result: {:?}", cur);
     Json(cur)

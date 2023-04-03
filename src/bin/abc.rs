@@ -1,66 +1,123 @@
-// use std::collections::HashMap;
-// use std::fs::File;
-// use std::io::{BufRead, BufReader};
-// use serde::{Serialize, Deserialize};
+// use axum::{
+//     routing::{get, post},
+//     http::StatusCode,
+//     response::IntoResponse,
+//     Json, Router,
+// };
+// use serde::{Deserialize, Serialize};
+// use std::net::SocketAddr;
+// use std::sync::Arc;
+// use axum::extract::State;
+// use tokio::spawn;
 //
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// struct Block {
-//     hash: String,
-//     data: String,
+// use tokio::sync::RwLock;
+//
+// pub struct Data{
+//     u:u32,
 // }
 //
-// struct Status {
-//     db_file: File,
-//     balances: HashMap<String, i32>,
-// }
+// impl Data{
+//     pub fn new() -> Self {
+//         Self {
+//             u:0,
+//         }
+//     }
+//     pub fn abc(& self){
+//        loop{
 //
-// impl Status {
-//     fn apply_block(&mut self, block: Block) {
-//         // Apply block to balances
-//         let amount = block.data.parse::<i32>().unwrap();
-//         *self.balances.entry(block.hash).or_insert(0) += amount;
+//        }
 //     }
 // }
+// #[tokio::main]
+// async fn main() {
+//     let data=Arc::new(RwLock::new(Data::new()));
 //
-// fn main() {
-//     // let file = File::open("blocks.json").unwrap();
-//     // let bufreader = BufReader::new(&file);
-//     //
-//     // // Initialize status with balances
-//     // let balances = HashMap::new();
-//     // let mut status = Status { db_file: file, balances };
-//     //
-//     // // Read blocks and apply to status
-//     // for line in bufreader.lines() {
-//     //     let line = line.unwrap();
-//     //     let block: Block = serde_json::from_str(&line).unwrap();
-//     //     status.apply_block(block);
-//     // }
-//     //
-//     // println!("{:?}", status.balances);
+//     let data1=data.clone();
+//     spawn(async move{
+//         data1.write().await.abc();
+//     });
+//
+//     // build our application with a route
+//     let app = Router::new()
+//         // `GET /` goes to `root`
+//         .route("/", get(root))
+//         // `POST /users` goes to `create_user`
+//         .route("/users", post(create_user))
+//         .with_state(data)
+//         ;
+//
+//     // run our app with hyper
+//     // `axum::Server` is a re-export of `hyper::Server`
+//     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+//     axum::Server::bind(&addr)
+//         .serve(app.into_make_service())
+//         .await
+//         .unwrap();
+// }
+//
+// // basic handler that responds with a static string
+// async fn root() -> &'static str {
+//  "Hello, World!"
+//
+// }
+//
+// async fn create_user(
+//     // this argument tells axum to parse the request body
+//     // as JSON into a `CreateUser` type
+//     Json(payload): Json<CreateUser>,
+// ) -> (StatusCode, Json<User>) {
+//     // insert your application logic here
+//     let user = User {
+//         id: 1337,
+//         username: payload.username,
+//     };
+//
+//     // this will be converted into a JSON response
+//     // with a status code of `201 Created`
+//     (StatusCode::CREATED, Json(user))
+// }
+//
+// // the input to our `create_user` handler
+// #[derive(Deserialize)]
+// struct CreateUser {
+//     username: String,
+// }
+//
+// // the output to our `create_user` handler
+// #[derive(Serialize)]
+// struct User {
+//     id: u64,
+//     username: String,
 // }
 
-    use std::sync::{Arc, Mutex};
-    use tokio::sync::mpsc;
 
-    async fn async_operation(_state: Arc<Mutex<State>>) -> u32 {
-        // ...
-        42
-    }
 
-    struct State {
-        // ...
-    }
+use axum::{routing::get, Router};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::task::yield_now;
 
-    #[tokio::main]
-    async fn main() {
-        let state = Arc::new(Mutex::new(State { /* ... */ }));
-        let (tx, mut rx) = mpsc::channel(1);
-        let handle = tokio::spawn(async move {
-            let result = async_operation(state.clone()).await;
-           tx.send(result).await.unwrap();
-        });
-        let result = rx.recv().await.unwrap();
-        handle.await.unwrap();
-        println!("{}", result);
+async fn handle_request() -> String {
+    // 执行一个长时间运行的循环，并定期使用 yield_now() 函数
+    let mut i = 0;
+    loop {
+        i += 1;
+        if i % 1000000 == 0 {
+            yield_now().await;
+        }
     }
+    "Done".to_string()
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new().route("/", get(handle_request));
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3009));
+
+    println!("Server listening on http://{}", addr);
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}

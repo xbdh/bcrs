@@ -13,11 +13,11 @@ use crate::node::{Node,PeerNode};
 pub async fn curr_status(
     State(node):State<Arc<Node>>
 ) -> impl IntoResponse {
-    info!("current status handler");
+    info!("Handler current status");
 
 
     let bstatus = node.get_status().await;
-    let mut known_peers = node.get_known_peers().await;
+    let  known_peers = node.get_known_peers().await;
     
     let pending_txs_mp = node.get_pending_txs().await;
     let vv=get_txsv_from_txsmp(&pending_txs_mp);

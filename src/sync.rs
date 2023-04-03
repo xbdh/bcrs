@@ -15,11 +15,11 @@ const ENDOINT_ADD_PERR: &str = "/node/peer";
 const ENDOINT_ADD_PERR_QUERY_KEY_IP: &str = "ip";
 
 const ENDOINT_ADD_PERR_QUERY_KEY_PORT: &str = "port";
-
+const ENDOINT_ADD_PERR_QUERY_KEY_ACCOUNT: &str = "account";
 
 impl Node {
     pub async fn sync(&self) -> Result<()> {
-        info!("syncing with peers,with 45 second interval");
+        info!("syncing with peers,with 25 second interval");
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(25));
         loop {
             select! {
@@ -35,7 +35,7 @@ impl Node {
 
 
     pub async fn do_sync(&self) -> Result<()> {
-        info!("do sync for four things : query status, join peers ,sync blocks, sync peers");
+        info!("do sync start");
         for (tcp_addr, peer) in self.get_known_peers().await.iter(){
             // 错误也要继续
             let peer_curr_state =  match query_peer_status(peer).await{
@@ -96,14 +96,17 @@ impl Node {
         if peer.is_connected{
             return Ok(());
         }
-        let url = format!("http://{}:{}{}?{}={}&{}={}",
+        let url = format!("http://{}:{}{}?{}={}&{}={}&{}={}",
                           peer.ip,
                           peer.port,
                           ENDOINT_ADD_PERR,
                           ENDOINT_ADD_PERR_QUERY_KEY_IP,
                           self.info.ip,
                           ENDOINT_ADD_PERR_QUERY_KEY_PORT,
-                          self.info.port);
+                          self.info.port,
+                          ENDOINT_ADD_PERR_QUERY_KEY_ACCOUNT,
+                          self.info.account,
+        );
         //info!("join peer url: {}",url);
         let client = reqwest::Client::new();
         let res = client.get(&url).send().await?;
@@ -130,7 +133,7 @@ impl Node {
         let local_block_hash =bstatus.get_last_block_hash();
 
         // 如果本地高度大于等于对方高度，不需要同步
-        info!("my height:{:?},peer height:{:?}",local_block_height,node_status.height);
+        //info!("my height:{:?},peer height:{:?}",local_block_height,node_status.height);
 
         // 如果本地为没有块，对方有至少一块，需要同步，从对方的第一块开始同步，begin_hash=Default::default()
         if local_block_height==0&&local_block_hash==Default::default()&&node_status.hash!=Default::default(){
@@ -154,7 +157,7 @@ impl Node {
         // 把对方的peer列表同步到本地
         info!("===begin sync known peers from peer: {:?}", peer.tcp_addr());
         for (tcp_addr,peer) in node_status.known_peers.iter(){
-            info!("know peers from peer is : {:?}", peer);
+            //info!("know peers from peer is : {:?}", peer);
 
             let mut peerc=peer.clone();
 
@@ -169,7 +172,7 @@ impl Node {
         // 把对方的pending txs同步到本地
         info!("===begin sync pending txs from peer: {:?}", peer.tcp_addr());
         for tx in txs.iter(){
-            info!("pending tx from peer is : {:?}", tx);
+            //info!("pending tx from peer is : {:?}", tx);
             self.add_pending_tx(tx.clone(),peer).await?;
         }
         Ok(())
@@ -180,6 +183,7 @@ impl Node {
         let mut bstatus = self.bstatus.write().await;
         for b in block.iter() {
             bstatus.add_block(b.clone())?;
+            info!("将新同步的block 发送到channel{:?}", b);
             let new_sync_block_channel = self.new_sync_block_channel.clone();
             new_sync_block_channel.send(b.clone()).await?;
         }

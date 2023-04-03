@@ -13,7 +13,7 @@ use crate::node::{Node};
 pub async fn balances_list(
     State(node):State<Arc<Node>>
 ) -> impl IntoResponse {
-    info!("balances list handler");
+    info!("Handler balances list");
 
     let bstatus = node.bstatus.read().await;
 

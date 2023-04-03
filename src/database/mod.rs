@@ -1,6 +1,7 @@
 pub mod bstate;
 pub mod tx;
 pub mod block;
+pub  mod purems;
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ pub use tx::Tx;
 pub use bstate::BStatus;
 pub use tx::TxType;
 pub use block::BHash;
+pub use purems::Pure;
 
 
 #[derive(Serialize, Deserialize,Debug, Clone)]

@@ -1,12 +1,19 @@
 use std::fs::OpenOptions;
+use std::hash::Hash;
 use std::io::{BufRead, BufReader};
-use crate::database::tx::Tx;
+use crate::database::tx::{Account, Tx};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use blake3;
 
-#[derive( Debug, Clone,Copy,Default,Eq,Hash)]
+#[derive( Debug, Clone,Copy,Default,Eq)]
 pub struct BHash(pub [u8;32]);
+
+impl Hash for BHash {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
 
 impl PartialEq for BHash {
     fn eq(&self, other: &Self) -> bool {
@@ -49,16 +56,18 @@ pub struct BlockHeader {
     pub number: u64,
     pub nonce: u64,
     pub timestamp: u64,
+    pub miner:Account,
 }
 
 impl Block{
-    pub fn new(prev_hash: BHash, timestamp: u64, number:u64, nonce :u64,txs: Vec<Tx>) -> Self {
+    pub fn new(prev_hash: BHash, timestamp: u64, number:u64, nonce :u64,miner:Account,txs: Vec<Tx>) -> Self {
         Self {
             header: BlockHeader {
                 prev_hash,
                 number,
                 nonce,
                 timestamp,
+                miner,
             },
             txs,
         }
@@ -120,7 +129,7 @@ pub fn is_block_hash_valid(hash: &BHash) ->bool {
     let mut hash_array = hash.0;
     let hash_str = hex::encode(hash_array);
 
-    if hash_str.starts_with("00000") {
+    if hash_str.starts_with("000000") {
         return true;
     }
     false

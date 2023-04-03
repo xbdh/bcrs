@@ -11,9 +11,10 @@ pub async fn sync_blocks(
     Query(q):Query<SyncBlocksQuery>,
     State(node):State<Arc<Node>>
 ) -> impl IntoResponse {
-    info!("sync blocks handler");
+    info!("Handler sync blocks");
     let dir=node.dir_path.clone();
     let bhash=q.begin_hash;
+    info!("sync blocks from hash: {:?}", bhash);
     let blocks=get_blocks_after_hash(bhash, dir).unwrap();
 
     Json(blocks)

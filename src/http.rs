@@ -13,12 +13,13 @@ use clap::{Parser};
 use bcrs::routes::addpeer::add_peer;
 use log::{info, LevelFilter};
 use env_logger::{Builder, fmt::Color};
+use bcrs::database::tx::Account;
 
 #[derive(Parser, Debug, Clone)]
 #[clap(name = "http", version = "0.1.0", author = "rain")]
 struct Opts {
     #[clap(short, long)]
-    pub name: String,
+    pub miner: String,
     #[clap(short, long)]
     pub ip: String,
     #[clap(short, long)]
@@ -55,9 +56,9 @@ async fn main(){
 
     let opts: Opts = Opts::parse();
 
-    let bootstrap_node = PeerNode::new("127.0.0.1".to_string(),3001,true,false);
+    let bootstrap_node = PeerNode::new("127.0.0.1".to_string(),3001,"0x446E89D661D607868FBD8E881E6A15C3797AF140".to_string(),true,false);
 
-    let node = Node::new(opts.name,opts.dir.clone(),opts.ip,opts.port,bootstrap_node).unwrap();
+    let node = Node::new(opts.miner, opts.dir.clone(), opts.ip, opts.port, bootstrap_node).unwrap();
 
     let http_node = Arc::new(node);
     let sync_node = http_node.clone();

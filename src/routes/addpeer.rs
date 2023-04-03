@@ -10,11 +10,12 @@ pub async fn add_peer(
     State(node):State<Arc<Node>>,
     Query(req): Query<AddPeerRequest>,
 ) -> impl IntoResponse {
-    info!("add peer handler");
+    info!("Handler add peer");
     let ip=req.ip;
     let port=req.port;
-    info!("add peer ip:{}, port:{}", ip, port);
-    let peer=PeerNode::new(ip, port, false, true);
+    let account=req.account;
+    info!("peer info: ip:{}, port:{} account:{}", ip, port, account);
+    let peer=PeerNode::new(ip, port, account.clone(),false, true);
     let tcp_addr=peer.tcp_addr();
     node.add_peer_to_known_peers(tcp_addr, peer).await;
 
@@ -28,6 +29,7 @@ pub async fn add_peer(
 pub struct AddPeerRequest {
     pub ip: String,
     pub port: u16,
+    pub account:String,
 
 }
 

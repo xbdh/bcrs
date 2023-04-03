@@ -5,6 +5,7 @@ use crate::database::block::is_block_hash_valid;
 use anyhow::Result;
 use log::info;
 use tokio::select;
+use crate::database::tx::Account;
 use crate::node::{Node, PeerNode};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -12,15 +13,18 @@ pub struct PendingBlock {
     pub prev_hash: BHash,
     pub  number: u64,
     pub timestamp: u64,
+    pub account: Account,
     pub txs: Vec<Tx>,
+
 }
 
 impl PendingBlock{
-    pub fn new(prev_hash: BHash, number:u64, txs: Vec<Tx>) -> Self {
+    pub fn new(prev_hash: BHash, number:u64, account:String,txs: Vec<Tx>) -> Self {
         Self {
             prev_hash,
             number,
             timestamp: chrono::Utc::now().timestamp() as u64,
+            account: account,
             txs,
         }
     }
@@ -34,8 +38,8 @@ fn generate_nonce() -> u64 {
 
 
 impl Node {
-    pub async fn mine(&self) {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(25));
+    pub async fn mine(&self)->Result<()>{
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
 
         loop {
             let node = self.clone();
@@ -44,14 +48,16 @@ impl Node {
             select! {
 
                 _ = ticker.tick() => {
+                    info!("********定时器时间到*********");
                     tokio::spawn(async move {
                         let len = node.get_pending_txs().await.len();
                         let is_mining = node.get_is_mining().await;
                         if len > 0 && !is_mining {
+                            info!("********start mining*********");
                             node.set_is_mining(true).await;
-                            node.mine_pending_txs().await;
+                            node.mine_pending_txs().await.unwrap();
                             node.set_is_mining(false).await;
-
+                            info!("********end mining*********");
                         }
 
                       });
@@ -60,9 +66,17 @@ impl Node {
                     res = new_sync_block_channel.recv()=> {
                       match res{
                         Ok(block) => {
+                            info!("从channel 中获取新同步的块 {:?}",block);
                             let is_mining = node2.get_is_mining().await;
                             if is_mining {
+                                node2.remove_mined_pending_txs(&block).await;
                                 node2.cancel_flag.cancel();
+                                info! ("******** mining canceled*********");
+                                //node2.cancel_flag.reset();
+                                node2.set_is_mining(false).await;
+                            }
+                            // 如果不在挖矿，并且本地pending tx中有同步的block的交易，就删除
+                            else{
                                 node2.remove_mined_pending_txs(&block).await;
                             }
                         }
@@ -71,20 +85,30 @@ impl Node {
                         }
                       }
 
-          }
-        }
+                    }
+           }
         }
 
     }
+
 
     // if success, means the block is valid and add to blockchain
     pub async fn mine_pending_txs(&self) -> Result<()> {
         let block_to_mine=PendingBlock::new(
             self.get_last_block_hash().await,
             self.get_next_block_number().await,
+            self.info.account.clone(),
             get_txsv_from_txsmp(&self.get_pending_txs().await),
         );
-        let mined_block= self.do_mine(block_to_mine);
+        let node = self.clone();
+        let mined_block= tokio::task::spawn_blocking(
+             move|| {
+                    let block=  node.do_mine(block_to_mine);
+                    block
+            }
+        ).await.unwrap();
+      // mined_block.
+        //let mined_block= do_mine(block_to_mine);
         match mined_block {
             Ok(block) => {
                 self.remove_mined_pending_txs(&block).await?;
@@ -92,10 +116,13 @@ impl Node {
             }
             Err(e) => {
                 info!("mine canceled: {}", e);
+                self.cancel_flag.reset();
             }
         }
         Ok(())
     }
+
+
     pub fn do_mine(&self,pending_block: PendingBlock) -> Result<Block> {
         if pending_block.txs.len() == 0 {
 
@@ -108,11 +135,12 @@ impl Node {
         loop {
             if self.cancel_flag.is_canceled() {
                 info!("cancel mining");
+
                 return Err(anyhow::anyhow!("cancel mining"));
             }
 
             let nonce = generate_nonce();
-            let b = Block::new(pending_block.prev_hash, pending_block.timestamp, pending_block.number, nonce, pending_block.txs.clone());
+            let b = Block::new(pending_block.prev_hash, pending_block.timestamp, pending_block.number, nonce, pending_block.account.clone(),pending_block.txs.clone());
             let hash = b.hash()?;
             if is_block_hash_valid(&hash) {
                 block=b;
@@ -123,8 +151,9 @@ impl Node {
                 info!("Mine attempts: {} times, ", attempts);
             }
         }
+        info!("Miner is : {}", self.info.account);
         info!("Mine block success, cost: {:?}s", start.elapsed().as_secs_f64());
-        info!("Mine block hash: {:?}", block.hash()?);
+        info!("Mine block hash: {:?}", hex::encode(block.hash().unwrap().0)) ;
         info!("Mine block nonce: {:?}", block.header.nonce);
         info!("Mine block number: {:?}", block.header.number);
         info!("Mine block prev_hash: {:?}",hex::encode(block.header.prev_hash.0));
@@ -153,8 +182,9 @@ impl Node {
 
     pub async fn add_pending_tx(&self, tx: Tx,from_peer:&PeerNode) -> Result<()> {
         let tx_hash = tx.tx_hash();
-        let mut pending_txs = self.get_pending_txs().await;
-        let mut archive_txs = self.get_archive_txs().await;
+        let pending_txs = self.get_pending_txs().await;
+        let archive_txs = self.get_archive_txs().await;
+
         if !pending_txs.contains_key(&tx_hash) && !archive_txs.contains_key(&tx_hash) {
             info!("add_pending_tx from peer: {:?}",from_peer);
             self.add_tx_to_pending_txs(tx.clone()).await;

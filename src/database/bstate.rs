@@ -7,6 +7,7 @@ use log::info;
 use crate::database::block::{BHash, Block, BlockFS, is_block_hash_valid};
 use crate::database::init_genesis;
 use crate::database::tx::TxType;
+const BLOCK_REWARD:u64 = 100;
 
 #[derive(Debug)]
 pub struct BStatus {
@@ -139,6 +140,7 @@ fn apply_block(block: Block,bstatus:&mut BStatus) -> Result<()> {
     }
     
     apply_txs(block.txs,bstatus)?;
+    bstatus.balances.entry(block.header.miner).and_modify(|e| *e += BLOCK_REWARD).or_insert(BLOCK_REWARD);
     Ok(())
 }
 

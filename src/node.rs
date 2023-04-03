@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::Arc;
 use crate::database::{BHash, Block, BStatus, Tx};
 use anyhow::{anyhow, Result};
@@ -13,6 +14,7 @@ use crate::routes::currstatus::CurrentStatusResponse;
 use tokio::sync::mpsc::{Receiver, Sender};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
+use crate::database::tx::Account;
 
 const SYNC_INTERVAL: u64 = 25;
 
@@ -20,6 +22,7 @@ const SYNC_INTERVAL: u64 = 25;
 pub struct PeerNode {
     pub ip: String,
     pub port: u16,
+    pub account:Account,
     pub is_bootstrap: bool,
 
     // when peer is connected to this node, it will be set to true
@@ -27,10 +30,11 @@ pub struct PeerNode {
 }
 
 impl PeerNode {
-    pub fn new(ip: String, port: u16, is_bootstrap: bool, is_connected: bool) -> Self {
+    pub fn new(ip: String, port: u16, account: Account, is_bootstrap: bool, is_connected: bool) -> Self {
         Self {
             ip,
             port,
+            account,
             is_bootstrap,
             is_connected,
         }
@@ -58,6 +62,9 @@ impl CancelFlag {
     }
     pub fn is_canceled(&self) -> bool {
         self.cancel_flag.load(Ordering::SeqCst)
+    }
+    pub fn reset(&self) {
+        self.cancel_flag.store(false, Ordering::SeqCst);
     }
 }
 
@@ -96,7 +103,6 @@ impl SyncBlockChannel{
 
 #[derive(Debug, Clone)]
 pub struct Node {
-    pub name: String,
     pub dir_path: String,
     pub info :PeerNode,
 
@@ -113,7 +119,7 @@ pub struct Node {
 }
 
 impl Node{
-    pub fn new(name:String,dir_path:String,ip:String,port:u16, bootstrap : PeerNode) -> Result<Self> {
+    pub fn new(miner:Account,dir_path:String,ip:String,port:u16, bootstrap : PeerNode) -> Result<Self> {
         let bstatus = BStatus::new(dir_path.clone())?;
         let mut peers=HashMap::new();
         let tcp_addr=bootstrap.tcp_addr();
@@ -121,7 +127,7 @@ impl Node{
         let mut is_bootstrap = false;
         let mut btc=bootstrap.clone();
         if bootstrap.ip==ip && bootstrap.port==port {
-            info!("{} created, bootstrap node is self",name);
+            info!("{} created, bootstrap node is self",miner);
             is_bootstrap = true;
             btc.is_connected=true;
         }
@@ -129,9 +135,8 @@ impl Node{
         peers.insert(tcp_addr,btc);
 
          let node=   Self {
-                name,
                 dir_path,
-                info: PeerNode::new(ip,port,is_bootstrap,false),
+                info: PeerNode::new(ip,port,miner,is_bootstrap,false),
                 bstatus: Arc::new(RwLock::new(bstatus)),
                 known_peers: Arc::new(RwLock::new(peers)),
                 pending_txs: Arc::new(RwLock::new(HashMap::new())),
